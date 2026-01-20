@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <meta charset="UTF-8">
+    <title>扑克计分游戏</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 40px auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #ccc; padding: 24px; }
+        h1 { text-align: center; }
+        .hand, .score { margin: 16px 0; }
+        .cards { display: flex; flex-wrap: wrap; gap: 8px; }
+        .card { width: 48px; height: 68px; background: #fff; border: 1px solid #888; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 22px; cursor: pointer; transition: box-shadow .2s; }
+        .card.selected { box-shadow: 0 0 8px #0078d7; border-color: #0078d7; }
+        .btn { padding: 8px 20px; background: #0078d7; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin: 8px 0; }
+        .btn:disabled { background: #aaa; }
+        .log { background: #eee; padding: 8px; border-radius: 4px; min-height: 60px; margin-top: 16px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>扑克计分游戏</h1>
+    <div class="score">
+        <strong>你的得分：</strong> <span id="playerScore">0</span>
+        <strong style="margin-left:40px;">AI得分：</strong> <span id="aiScore">0</span>
+    </div>
+    <div class="hand">
+        <strong>你的手牌：</strong>
+        <div class="cards" id="playerHand"></div>
+    </div>
+    <div class="hand">
+        <strong>AI手牌：</strong>
+        <div class="cards" id="aiHand"></div>
+    </div>
+    <button class="btn" id="playBtn">出牌</button>
+    <button class="btn" id="passBtn">弃牌</button>
+    <div class="log" id="log"></div>
+</div>
+<script>
+// 工具函数
+function cardStr(card) {
+    return card.suit ? card.suit + card.value : card.value;
+}
+
+function sortHand(hand) {
+    const CARD_ORDER = ['7', 'BJ', 'SJ', '5', '2', '3', 'A', 'K', 'Q', 'J', '10', '9', '8', '6', '4'];
+    const SUIT_ORDER = ['♠', '♥', '♣', '♦'];
+    return hand.slice().sort((a, b) => {
+        let va = CARD_ORDER.indexOf(a.value), vb = CARD_ORDER.indexOf(b.value);
+        if (va !== vb) return va - vb;
+        let sa = a.suit ? SUIT_ORDER.indexOf(a.suit) : -1;
+        let sb = b.suit ? SUIT_ORDER.indexOf(b.suit) : -1;
+        return sa - sb;
+    });
+}
+
+let gameState = {
+    playerHand: [],
+    aiHandCount: 0,
+    playerScore: 0,
+    aiScore: 0,
+    currentPlayer: 'player',
+    log: [],
+    gameEnd: false,
+    winner: null
+};
+
+function logMsg(msg) {
+    gameState.log.push(msg);
+    document.getElementById('log').innerHTML = gameState.log.slice(-5).join('<br>');
+}
+
+function render() {
+    document.getElementById('playerHand').innerHTML = '';
+    for (let card of sortHand(gameState.playerHand)) {
+        let div = document.createElement('div');
+        div.className = 'card';
+        div.textContent = cardStr(card);
+        div.onclick = () => {
+            div.classList.toggle('selected');
+        };
+        document.getElementById('playerHand').appendChild(div);
+    }
+    document.getElementById('aiHand').innerHTML = '';
+    for (let i = 0; i < gameState.aiHandCount; i++) {
+        let div = document.createElement('div');
+        div.className = 'card';
+        div.textContent = '🂠';
+        document.getElementById('aiHand').appendChild(div);
+    }
+    document.getElementById('playerScore').textContent = gameState.playerScore;
+    document.getElementById('aiScore').textContent = gameState.aiScore;
+    document.getElementById('playBtn').disabled = gameState.gameEnd || gameState.currentPlayer !== 'player';
+    document.getElementById('passBtn').disabled = gameState.gameEnd || gameState.currentPlayer !== 'player';
+    if (gameState.gameEnd && gameState.winner) {
+        logMsg('游戏结束！胜者：' + gameState.winner);
+    }
+}
+
+function getSelectedCards() {
+    let nodes = document.querySelectorAll('#playerHand .card.selected');
+    let selected = [];
+    let hand = sortHand(gameState.playerHand);
+    for (let node of nodes) {
+        let txt = node.textContent;
+        for (let card of hand) {
+            if (cardStr(card) === txt && !selected.includes(card)) {
+                selected.push(card);
+                break;
+            }
+        }
+    }
+    return selected;
+}
+
+function startGame() {
+    fetch('/api/start', {method: 'POST'})
+        .then(res => res.json())
+        .then(data => {
+            gameState.playerHand = data.playerHand;
+            gameState.aiHandCount = data.aiHandCount;
+            gameState.playerScore = data.playerScore;
+            gameState.aiScore = data.aiScore;
+            gameState.currentPlayer = data.currentPlayer;
+            gameState.log = [];
+            gameState.gameEnd = false;
+            gameState.winner = null;
+            logMsg('你先出牌！');
+            render();
+        });
+}
+
+document.getElementById('playBtn').onclick = function() {
+    if (gameState.currentPlayer !== 'player' || gameState.gameEnd) return;
+    let selected = getSelectedCards();
+    if (!selected.length) {
+        logMsg('请选择要出的牌！');
+        return;
+    }
+    // 玩家出牌，先显示玩家出的牌
+    fetch('/api/play', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cards: selected})
+    })
+    .then(res => res.json())
+    .then(data => {
+        gameState.playerHand = data.playerHand;
+        gameState.aiHandCount = data.aiHandCount;
+        gameState.playerScore = data.playerScore;
+        gameState.aiScore = data.aiScore;
+        gameState.gameEnd = data.gameEnd;
+        gameState.winner = data.winner;
+        render();
+        logMsg('你出牌: ' + selected.map(cardStr).join(' '));
+        // 如果AI有出牌，延迟显示
+        if (data.aiCards && data.aiCards.length) {
+            setTimeout(() => {
+                logMsg('AI出牌: ' + data.aiCards.map(cardStr).join(' '));
+            }, 800);
+        }
+    });
+};
+
+document.getElementById('passBtn').onclick = function() {
+    if (gameState.currentPlayer !== 'player' || gameState.gameEnd) return;
+    fetch('/api/pass', {method: 'POST'})
+        .then(res => res.json())
+        .then(data => {
+            gameState.playerHand = data.playerHand;
+            gameState.aiHandCount = data.aiHandCount;
+            gameState.playerScore = data.playerScore;
+            gameState.aiScore = data.aiScore;
+            gameState.gameEnd = data.gameEnd;
+            gameState.winner = data.winner;
+            render();
+            logMsg('你弃牌。');
+            if (data.aiCards && data.aiCards.length) {
+                setTimeout(() => {
+                    logMsg('AI出牌: ' + data.aiCards.map(cardStr).join(' '));
+                }, 800);
+            }
+        });
+};
+
+window.onload = startGame;
+</script>
+</body>
+</html>
