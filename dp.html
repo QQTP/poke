@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <meta charset="UTF-8">
+    <title>扑克计分游戏 - 独立版</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #ccc; padding: 24px; }
+        h1 { text-align: center; color: #333; }
+        .hand, .score { margin: 16px 0; }
+        .cards { display: flex; flex-wrap: wrap; gap: 8px; }
+        .card { width: 60px; height: 84px; background: #fff; border: 2px solid #888; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; transition: all 0.3s; position: relative; }
+        .card.selected { box-shadow: 0 0 12px #0078d7; border-color: #0078d7; transform: translateY(-5px); }
+        .card.red { color: #d00; }
+        .card.black { color: #000; }
+        .btn { padding: 10px 24px; background: #0078d7; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; margin: 8px 8px 8px 0; transition: background 0.3s; }
+        .btn:hover { background: #005a9e; }
+        .btn:disabled { background: #aaa; cursor: not-allowed; }
+        .btn-group { display: flex; gap: 10px; margin: 16px 0; }
+        .log { background: #f8f9fa; padding: 12px; border-radius: 6px; min-height: 80px; margin-top: 20px; border-left: 4px solid #0078d7; font-size: 14px; line-height: 1.5; }
+        .status { background: #e7f3ff; padding: 10px; border-radius: 6px; margin: 10px 0; text-align: center; font-weight: bold; }
+        .score-display { display: flex; justify-content: space-around; background: #f0f8ff; padding: 15px; border-radius: 8px; margin: 15px 0; }
+        .score-item { text-align: center; }
+        .score-value { font-size: 24px; font-weight: bold; color: #0078d7; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🎴 扑克计分游戏 - 独立版</h1>
+    
+    <div class="score-display">
+        <div class="score-item">
+            <div>你的得分</div>
+            <div class="score-value" id="playerScore">0</div>
+        </div>
+        <div class="score-item">
+            <div>AI得分</div>
+            <div class="score-value" id="aiScore">0</div>
+        </div>
+    </div>
+
+    <div class="status" id="status">游戏准备中...</div>
+
+    <div class="hand">
+        <strong>🎯 你的手牌：</strong>
+        <div class="cards" id="playerHand"></div>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn" id="playBtn">出牌</button>
+        <button class="btn" id="passBtn">弃牌</button>
+        <button class="btn" id="restartBtn">重新开始</button>
+    </div>
+
+    <div class="hand">
+        <strong>🤖 AI手牌：</strong>
+        <div class="cards" id="aiHand"></div>
+    </div>
+
+    <div class="log" id="log">游戏日志将显示在这里...</div>
+</div>
+
+<script>
+// 游戏常量
+const CARD_ORDER = ['7', 'BJ', 'SJ', '5', '2', '3', 'A', 'K', 'Q', 'J', '10', '9', '8', '6', '4'];
+const SUIT_ORDER = ['♠', '♥', '♣', '♦'];
+const SCORED_CARDS = {'5': 5, '10': 10, 'K': 10};
+
+// 卡牌类
+class Card {
+    constructor(value, suit = null) {
+        this.value = value;
+        this.suit = suit;
+    }
+    
+    toString() {
+        return this.suit ? this.suit + this.value : this.value;
+    }
+    
+    equals(other) {
+        return this.value === other.value && this.suit === other.suit;
+    }
+    
+    getColorClass() {
+        if (!this.suit) return 'black'; // 大小王默认黑色
+        return this.suit === '♥' || this.suit === '♦' ? 'red' : 'black';
+    }
+}
+
+// 游戏类
+class Game {
+    constructor() {
+        this.deck = this.createDeck();
+        this.playerHand = [];
+        this.aiHand = [];
+        this.playerScoreCards = [];
+        this.aiScoreCards = [];
+        this.lastPlay = null;
+        this.lastPlayCards = [];
+        this.lastPlayPlayer = null;
+        this.roundScoreCards = [];
+        this.currentPlayer = 'player';
+        this.gameEnd = false;
+        this.winner = null;
+        this.deal();
+    }
+    
+    createDeck() {
+        const deck = [];
+        for (const value of CARD_ORDER) {
+            if (value === 'BJ') {
+                deck.push(new Card('BJ'));
+            } else if (value === 'SJ') {
+                deck.push(new Card('SJ'));
+            } else {
+                for (const suit of SUIT_ORDER) {
+                    deck.push(new Card(value, suit));
+                }
+            }
+        }
+        // Fisher-Yates洗牌算法
+        for (let i = deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+        return deck;
+    }
+    
+    deal() {
+        for (let i = 0; i < 5; i++) {
+            if (this.deck.length > 0) {
+                this.playerHand.push(this.deck.pop());
+            }
+            if (this.deck.length > 0) {
+                this.aiHand.push(this.deck.pop());
+            }
+        }
+    }
+    
+    refillHands() {
+        while (this.playerHand.length < 5 && this.deck.length > 0) {
+            this.playerHand.push(this.deck.pop());
+        }
+        while (this.aiHand.length < 5 && this.deck.length > 0) {
+            this.aiHand.push(this.deck.pop());
+        }
+    }
+    
+    getScore(scoreCards) {
+        return scoreCards.reduce((total, card) => total + (SCORED_CARDS[card.value] || 0), 0);
+    }
+    
+    removeCards(hand, cards) {
+        for (const card of cards) {
+            const index = hand.findIndex(c => c.equals(card));
+            if (index !== -1) {
+                hand.splice(index, 1);
+            }
+        }
+    }
+    
+    sortHand(hand) {
+        return hand.slice().sort((a, b) => {
+            const aIndex = CARD_ORDER.indexOf(a.value);
+            const bIndex = CARD_ORDER.indexOf(b.value);
+            if (aIndex !== bIndex) return aIndex - bIndex;
+            
+            const aSuitIndex = a.suit ? SUIT_ORDER.indexOf(a.suit) : -1;
+            const bSuitIndex = b.suit ? SUIT_ORDER.indexOf(b.suit) : -1;
+            return aSuitIndex - bSuitIndex;
+        });
+    }
+    
+    aiChooseCards() {
+        const sortedHand = this.sortHand(this.aiHand);
+        const scoreCards = sortedHand.filter(card => card.value in SCORED_CARDS);
+        
+        if (scoreCards.length > 0) {
+            return [scoreCards[0]];
+        }
+        
+        return sortedHand.length > 0 ? [sortedHand[0]] : [];
+    }
+    
+    playCards(player, cards) {
+        if (player === 'player') {
+            this.removeCards(this.playerHand, cards);
+            this.lastPlayPlayer = 'player';
+        } else {
+            this.removeCards(this.aiHand, cards);
+            this.lastPlayPlayer = 'ai';
+        }
+        
+        this.lastPlay = '单张';
+        this.lastPlayCards = cards;
+        this.roundScoreCards = cards.filter(card => card.value in SCORED_CARDS);
+        
+        if (this.roundScoreCards.length > 0) {
+            if (this.lastPlayPlayer === 'player') {
+                this.playerScoreCards.push(...this.roundScoreCards);
+            } else {
+                this.aiScoreCards.push(...this.roundScoreCards);
+            }
+        }
+        
+        this.refillHands();
+        this.currentPlayer = player === 'player' ? 'ai' : 'player';
+        this.checkGameEnd();
+    }
+    
+    checkGameEnd() {
+        this.gameEnd = this.playerHand.length === 0 && this.aiHand.length === 0 && this.deck.length === 0;
+        if (this.gameEnd) {
+            const playerScore = this.getScore(this.playerScoreCards);
+            const aiScore = this.getScore(this.aiScoreCards);
+            
+            if (playerScore > aiScore) {
+                this.winner = '你';
+            } else if (aiScore > playerScore) {
+                this.winner = 'AI';
+            } else {
+                this.winner = '平局';
+            }
+        }
+    }
+    
+    passTurn() {
+        this.currentPlayer = 'ai';
+        this.checkGameEnd();
+    }
+}
+
+// 游戏状态管理
+let game = null;
+
+// 工具函数
+function cardToDisplay(card) {
+    return card.toString();
+}
+
+function logMessage(message) {
+    const logElement = document.getElementById('log');
+    const timestamp = new Date().toLocaleTimeString();
+    logElement.innerHTML = `<strong>[${timestamp}]</strong> ${message}<br>` + logElement.innerHTML;
+}
+
+function updateStatus(message) {
+    document.getElementById('status').textContent = message;
+}
+
+function renderGame() {
+    // 更新玩家手牌
+    const playerHandElement = document.getElementById('playerHand');
+    playerHandElement.innerHTML = '';
+    
+    if (game) {
+        const sortedHand = game.sortHand(game.playerHand);
+        sortedHand.forEach(card => {
+            const cardElement = document.createElement('div');
+            cardElement.className = `card ${card.getColorClass()}`;
+            cardElement.textContent = cardToDisplay(card);
+            cardElement.title = card.toString();
+            cardElement.onclick = () => {
+                cardElement.classList.toggle('selected');
+            };
+            playerHandElement.appendChild(cardElement);
+        });
+        
+        // 更新AI手牌（显示背面）
+        const aiHandElement = document.getElementById('aiHand');
+        aiHandElement.innerHTML = '';
+        for (let i = 0; i < game.aiHand.length; i++) {
+            const cardElement = document.createElement('div');
+            cardElement.className = 'card black';
+            cardElement.textContent = '🂠';
+            cardElement.title = 'AI手牌';
+            aiHandElement.appendChild(cardElement);
+        }
+        
+        // 更新分数
+        document.getElementById('playerScore').textContent = game.getScore(game.playerScoreCards);
+        document.getElementById('aiScore').textContent = game.getScore(game.aiScoreCards);
+        
+        // 更新按钮状态
+        const playBtn = document.getElementById('playBtn');
+        const passBtn = document.getElementById('passBtn');
+        
+        if (game.gameEnd) {
+            playBtn.disabled = true;
+            passBtn.disabled = true;
+            updateStatus(`游戏结束！胜者：${game.winner}`);
+        } else {
+            playBtn.disabled = game.currentPlayer !== 'player';
+            passBtn.disabled = game.currentPlayer !== 'player';
+            updateStatus(game.currentPlayer === 'player' ? '轮到你了' : 'AI思考中...');
+        }
+    }
+}
+
+function getSelectedCards() {
+    const selectedElements = document.querySelectorAll('#playerHand .card.selected');
+    const selectedCards = [];
+    const playerHand = game ? game.sortHand(game.playerHand) : [];
+    
+    selectedElements.forEach(element => {
+        const cardText = element.textContent;
+        for (const card of playerHand) {
+            if (cardToDisplay(card) === cardText && !selectedCards.some(c => c.equals(card))) {
+                selectedCards.push(card);
+                break;
+            }
+        }
+    });
+    
+    return selectedCards;
+}
+
+function startGame() {
+    game = new Game();
+    logMessage('游戏开始！你先出牌。');
+    renderGame();
+}
+
+function playerPlay() {
+    if (!game || game.currentPlayer !== 'player' || game.gameEnd) return;
+    
+    const selectedCards = getSelectedCards();
+    if (selectedCards.length === 0) {
+        logMessage('请选择要出的牌！');
+        return;
+    }
+    
+    // 玩家出牌
+    game.playCards('player', selectedCards);
+    logMessage(`你出牌: ${selectedCards.map(cardToDisplay).join(' ')}`);
+    renderGame();
+    
+    // AI自动出牌
+    if (!game.gameEnd && game.currentPlayer === 'ai') {
+        setTimeout(() => {
+            const aiCards = game.aiChooseCards();
+            if (aiCards.length > 0) {
+                game.playCards('ai', aiCards);
+                logMessage(`AI出牌: ${aiCards.map(cardToDisplay).join(' ')}`);
+            }
+            renderGame();
+        }, 1000);
+    }
+}
+
+function playerPass() {
+    if (!game || game.currentPlayer !== 'player' || game.gameEnd) return;
+    
+    game.passTurn();
+    logMessage('你选择弃牌');
+    renderGame();
+    
+    // AI自动出牌
+    if (!game.gameEnd && game.currentPlayer === 'ai') {
+        setTimeout(() => {
+            const aiCards = game.aiChooseCards();
+            if (aiCards.length > 0) {
+                game.playCards('ai', aiCards);
+                logMessage(`AI出牌: ${aiCards.map(cardToDisplay).join(' ')}`);
+            }
+            renderGame();
+        }, 1000);
+    }
+}
+
+// 事件监听
+document.getElementById('playBtn').addEventListener('click', playerPlay);
+document.getElementById('passBtn').addEventListener('click', playerPass);
+document.getElementById('restartBtn').addEventListener('click', () => {
+    startGame();
+    logMessage('游戏重新开始！');
+});
+
+// 初始化游戏
+window.addEventListener('load', () => {
+    startGame();
+    
+    // 添加键盘快捷键
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            playerPlay();
+        } else if (event.key === ' ') {
+            event.preventDefault();
+            playerPass();
+        } else if (event.key === 'r' || event.key === 'R') {
+            startGame();
+            logMessage('游戏重新开始！');
+        }
+    });
+    
+    logMessage('游戏已加载完成！使用说明：');
+    logMessage('- 点击牌面选择/取消选择');
+    logMessage('- 按Enter键出牌，空格键弃牌，R键重新开始');
+    logMessage('- 得分牌：5(5分)、10(10分)、K(10分)');
+});
+</script>
+</body>
+</html>
